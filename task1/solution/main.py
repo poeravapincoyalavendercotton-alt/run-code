@@ -12,19 +12,22 @@ import oracle
 _JEDEC_D_MB = (512, 1024, 2048, 4096, 8192, 16384, 32768, 65536)
 
 
-def fetch_oracle() -> tuple[float, int, float, int, int, int]:
-    """Query the oracle for (r_N, N_refs, f_refs, r_G, r_B, N_cycles)."""
-    resp = oracle.handle_query(mode="simulation", parameters={})
-    if "error" in resp:
-        raise RuntimeError(resp["error"])
-    return (
-        resp["r_N"],
-        # resp["N_refs"],
-        resp["f_refs"],
-        resp["r_G"],
-        resp["r_B"],
-        resp["N_cycles"],
-    )
+def fetch_oracle() -> tuple[float, float, int, int, int]:
+    """Query the oracle for (r_N, f_refs, r_G, r_B, N_cycles)."""
+    try:
+        resp = oracle.handle_query(mode="simulation", parameters={})
+        if "error" in resp:
+            raise RuntimeError(resp["error"])
+        return (
+            resp["r_N"],
+            resp["f_refs"],
+            resp["r_G"],
+            resp["r_B"],
+            resp["N_cycles"],
+        )
+    except Exception as e:
+        print(f"Error fetching oracle: {e}")
+        return None, None, None, None, None
 
 
 def _tck_ps_for_preset(dtype: str) -> int:
@@ -223,7 +226,17 @@ def solve_constrained(
 
 def main():
     print("Querying oracle ...")
-    r_N, f_refs, r_G, r_B, n_cycles = fetch_oracle()
+    try:
+        r_N, f_refs, r_G, r_B, n_cycles = fetch_oracle()
+        if r_N is None or f_refs is None or r_G is None or r_B is None or n_cycles is None:
+            raise ValueError("Invalid oracle response")
+    except ValueError as e:
+        print(f"Error in fetching oracle: {e}")
+        return
+    except Exception as e:
+        print(f"Unexpected error in fetching oracle: {e}")
+        return
+
     n_refs = 3302 # NOTE: assume calculated from f_refs and n_cycles given correct tRFC selection
 
     print(
@@ -231,16 +244,23 @@ def main():
         f"r_B={r_B}  N_cycles={n_cycles}"
     )
 
-    help_resp = oracle.handle_query(mode="help", parameters={})
-    search_space = help_resp.get("search_space")
+    try:
+        help_resp = oracle.handle_query(mode="help", parameters={})
+        search_space = help_resp.get("search_space")
 
-    if search_space:
-        print("Using constrained search (help search_space)")
-        r, g, b, n, d = solve_constrained(r_N, f_refs, r_G, r_B, n_cycles, search_space)
-    else:
-        print("Using unconstrained inference (no search_space in help)")
-        r, g, b, n = solve_unconstrained(n_refs, f_refs, n_cycles, r_N, r_G, r_B, oracle.ORG_RANK)
-        d = infer_density_unconstrained(r, g, b, n, n_refs, n_cycles, f_refs)
+        if search_space:
+            print("Using constrained search (help search_space)")
+            r, g, b, n, d = solve_constrained(r_N, f_refs, r_G, r_B, n_cycles, search_space)
+        else:
+            print("Using unconstrained inference (no search_space in help)")
+            r, g, b, n = solve_unconstrained(n_refs, f_refs, n_cycles, r_N, r_G, r_B, oracle.ORG_RANK)
+            d = infer_density_unconstrained(r, g, b, n, n_refs, n_cycles, f_refs)
+    except ValueError as e:
+        print(f"Error in constrained/unconstrained search: {e}")
+        return
+    except Exception as e:
+        print(f"Unexpected error in constrained/unconstrained search: {e}")
+        return
 
     print(f"\nCalculated: R={r}, G={g}, B={b}, N={n}, D={d}")
     print(f"\nExpected (golden): R=2, G=2, B=4, N={1 << 17}, D=16384")
