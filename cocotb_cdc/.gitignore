@@ -1,0 +1,6 @@
+# cocotb / simulator build artifacts and per-run outputs
+sim_build/
+results.xml
+results.json
+sweep.log
+__pycache__/
